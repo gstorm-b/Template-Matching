@@ -22,7 +22,7 @@ inline int _mm_hsum_epi32(__m128i V) {
   return _mm_cvtsi128_si32(T);
 }
 
-inline int IM_Conv_SIMD (unsigned char* pCharKernel, unsigned char *pCharConv, int iLength) {
+inline int IM_Conv_SIMD(unsigned char* pCharKernel, unsigned char *pCharConv, int iLength) {
   const int iBlockSize = 16, Block = iLength / iBlockSize;
   __m128i SumV = _mm_setzero_si128 ();
   __m128i Zero = _mm_setzero_si128 ();
@@ -233,6 +233,12 @@ bool Matcher::Match() {
           Point ptMaxLoc; GetRotatedROI(vecSrcPyr[iLayer], tmpl_vecPyramid->at(iLayer).size(), ptLT * 2, vecAngles[j], matRotatedSrc);
           // MatchTemplate (matRotatedSrc, pTemplData, matResult, iLayer, true);
           this->MatchPattern(matRotatedSrc, &m_pattern, matResult, iLayer, true);
+
+          // if (iLayer == 0) {
+          //   this->MatchEdgePattern(matRotatedSrc, &m_edgePattern, matResult, iLayer, vecLayerScores[iLayer], true);
+          // } else {
+          //   this->MatchPattern(matRotatedSrc, &m_pattern, matResult, iLayer, true);
+          // }
           // this->MatchEdgePattern(matRotatedSrc, &m_edgePattern, matResult, iLayer, vecLayerScores[iLayer]);
           //matchTemplate (matRotatedSrc, pTemplData->vecPyramid[iLayer], matResult, CV_TM_CCOEFF_NORMED);
           minMaxLoc (matResult, 0, &dMaxValue, 0, &ptMaxLoc);
@@ -1047,10 +1053,10 @@ void Matcher::MatchPattern(cv::Mat &matSrc, Tmpl* pTmplData, cv::Mat &matResult,
       uchar* r_source = matSrc.ptr<uchar> (r);
       uchar* r_template, *r_sub_source;
       for (int c = 0; c < matResult.cols; ++c, ++r_matResult, ++r_source) {
-        r_template = matTemplate.ptr<uchar> ();
+        r_template = matTemplate.ptr<uchar>();
         r_sub_source = r_source;
         for (t_r = 0; t_r < t_r_end; ++t_r, r_sub_source += matSrc.cols, r_template += matTemplate.cols) {
-          *r_matResult = *r_matResult + IM_Conv_SIMD (r_template, r_sub_source, matTemplate.cols);
+          *r_matResult = *r_matResult + IM_Conv_SIMD(r_template, r_sub_source, matTemplate.cols);
         }
       }
     }

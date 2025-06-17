@@ -22,6 +22,7 @@ class Matcher {
     void setMatchSourceImage(cv::Mat &img);
     bool Match();
     bool MatchEdge();
+    // bool MatchEdgeImprove();
 
   private:
     void MatchEdgePattern(cv::Mat &matSrc, PatternModel *model,

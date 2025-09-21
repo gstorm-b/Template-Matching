@@ -43,8 +43,8 @@ void MainWindow::btn_match_clicked() {
   matcher.setEdgePatternImage(img_dst);
   matcher.setMatchSourceImage(img_source);
 
-  bool match_result = matcher.Match();
-  // bool match_result = matcher.MatchEdge();
+  // bool match_result = matcher.Match();
+  bool match_result = matcher.MatchEdge();
 
   if (match_result) {
     QPixmap result_img;

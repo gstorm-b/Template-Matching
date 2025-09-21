@@ -39,9 +39,9 @@ qnx: target.path = /tmp/$${TARGET}/bin
 else: unix:!android: target.path = /opt/$${TARGET}/bin
 !isEmpty(target.path): INSTALLS += target
 
-win32:CONFIG(release, debug|release): LIBS += -LC:/opencv/build/x64/vc16/lib/ -lopencv_world4110
-else:win32:CONFIG(debug, debug|release): LIBS += -LC:/opencv/build/x64/vc16/lib/ -lopencv_world4110
-else:unix: LIBS += -LC:/opencv/build/x64/vc16/lib/ -lopencv_world4100
+win32:CONFIG(release, debug|release): LIBS += -LC:/opencv/build/x64/vc16/lib/ -lopencv_world4120
+else:win32:CONFIG(debug, debug|release): LIBS += -LC:/opencv/build/x64/vc16/lib/ -lopencv_world4120
+else:unix: LIBS += -LC:/opencv/build/x64/vc16/lib/ -lopencv_world4120
 
 INCLUDEPATH += C:/opencv/build/include
 DEPENDPATH += C:/opencv/build/include

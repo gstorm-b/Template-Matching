@@ -33,6 +33,8 @@ class PatternModel {
 
     struct PatternLayer {
       cv::Mat image;
+      double score;
+      vector<double> norm_stop_early_score;
       vector<PatternPoint> patternPoints;
       vector<vector<Point>> contours;
       vector<Vec4i> hierarchies;
@@ -41,6 +43,7 @@ class PatternModel {
     PatternModel();
     void setEdgeProfile(EdgeProfile &profile);
     bool learnPattern(cv::Mat &imgPattern, int min_length);
+    void setMinScore(float min_score, float greediness);
 
     inline bool isPatternLearned() {
       return m_hasPatternLearned;
@@ -82,6 +85,7 @@ class PatternModel {
     // vector<Vec4i> m_hierarchyOfContours;
     vector<Mat> m_pyramids;
     vector<PatternLayer> m_patterns;
+    // vector<>
     EdgeProfile m_edgeProfile;
 };
 

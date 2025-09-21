@@ -11,6 +11,8 @@
 #include <immintrin.h>
 #include <omp.h>
 
+// #define USE_EDGE_SIMD
+
 inline int _mm_hsum_epi32(__m128i V) {
   // V3 V2 V1 V0
   // The actual speed is faster, and _mm_extract_epi32 is the slowest.
@@ -497,11 +499,11 @@ bool Matcher::MatchEdge() {
     warpAffine(vecSrcPyr[top_layer], matRotatedSrc, matR, sizeBest, INTER_LINEAR, BORDER_CONSTANT, Scalar(m_pattern.borderColor()));
     cv::Mat tmpl_top_mat = tmpl_vecPyramid->at(top_layer).clone();
 
-#ifndef USE_EDGE_SIMD
-    this->MatchEdgePattern(matRotatedSrc, &m_edgePattern, matResult, top_layer, vecLayerScores[top_layer], false);
-#else
+// #ifndef USE_EDGE_SIMD
+//     this->MatchEdgePattern(matRotatedSrc, &m_edgePattern, matResult, top_layer, vecLayerScores[top_layer], false);
+// #else
     this->MatchEdgePatternSIMD(matRotatedSrc, &m_edgePattern, matResult, top_layer, vecLayerScores[top_layer], false);
-#endif
+// #endif
 
     // cv::imshow("Image", matResult);
     // cv::waitKey(0);
@@ -605,7 +607,8 @@ bool Matcher::MatchEdge() {
           // cv::imwrite(save_name, matRotatedSrc);
 
 #ifndef USE_EDGE_SIMD
-          this->MatchEdgePattern(matRotatedSrc, &m_edgePattern, matResult, iLayer, vecLayerScores[iLayer], true);
+          // this->MatchEdgePattern(matRotatedSrc, &m_edgePattern, matResult, iLayer, vecLayerScores[iLayer], true);
+this->MatchEdgePatternSIMD(matRotatedSrc, &m_edgePattern, matResult, iLayer, vecLayerScores[iLayer], true);
 #else
           this->MatchEdgePatternSIMD(matRotatedSrc, &m_edgePattern, matResult, iLayer, vecLayerScores[iLayer], true);
 #endif
@@ -844,8 +847,6 @@ void Matcher::MatchEdgePattern(cv::Mat &matSrc, PatternModel *model, cv::Mat &ma
   }
   // std::cout << endRowIdx << " " << endColIdx << std::endl;
   Point pt_center = modelPattern.at(0).Center;
-  // for (int rowIdx = 0; rowIdx < matResult.rows; rowIdx++) {
-  // for (int colIdx = 0; colIdx < matResult.cols; colIdx++) {
   for (int rowIdx = startRowIdx; rowIdx < endRowIdx; rowIdx++) {
     for (int colIdx = startColIdx; colIdx < endColIdx; colIdx++) {
       double partialSum = 0.0;
@@ -853,8 +854,7 @@ void Matcher::MatchEdgePattern(cv::Mat &matSrc, PatternModel *model, cv::Mat &ma
       for (int count = 0; count < noOfCordinates; count++) {
         PatternModel::PatternPoint tempPoint = modelPattern[count];
         int CoorX = (int)(colIdx + tempPoint.Offset.x);
-        int CoorY = (int)(rowIdx + tempPoint.Offset.y);
-        // ignore invalid pixel
+        int CoorY = (int)(rowIdx + tempPoint.Offset.y);        // ignore invalid pixel
         if (CoorX < 0 || CoorY < 0 || CoorY >(imgDest.rows - 1) || CoorX >(imgDest.cols - 1)) {
         // check invalid
         // continue;
@@ -878,6 +878,8 @@ void Matcher::MatchEdgePattern(cv::Mat &matSrc, PatternModel *model, cv::Mat &ma
           break;
         }
       }
+
+
       if (partialScore >= minScores) {
         int tl_x = colIdx - pt_center.x;
         int tl_y = rowIdx - pt_center.y;
@@ -895,146 +897,109 @@ void Matcher::MatchEdgePattern(cv::Mat &matSrc, PatternModel *model, cv::Mat &ma
 
 void Matcher::MatchEdgePatternSIMD(cv::Mat &matSrc, PatternModel *model, cv::Mat &matResult,
                                    int layer, double minScores, bool fromCenter) {
-  const vector<PatternModel::PatternLayer>* patterns = model->getPatterns();
-  if (patterns->empty() || patterns->at(layer).patternPoints.empty())
-    return;
+  const auto &patterns = model->getPatterns()->at(layer);
+  const auto &modelPattern = patterns.patternPoints;
+  int noOfCoords = static_cast<int>(modelPattern.size());
+  if (noOfCoords == 0) return;
 
-  const auto& patternPoints = patterns->at(layer).patternPoints;
-  const int patternSize = (int)patternPoints.size();
-  const double normMinScore = minScores / patternSize;
-  const double normGreediness = ((1 - m_edgeProfile.greediness * minScores) /
-                                 (1 - m_edgeProfile.greediness)) / patternSize;
+  // Clone ảnh gốc và tính gradient
+  Mat imgGray = matSrc.clone();
+  Mat gx, gy, magnitude, angle;
+  Sobel(imgGray, gx, CV_64F, 1, 0, 3);
+  Sobel(imgGray, gy, CV_64F, 0, 1, 3);
+  cartToPolar(gx, gy, magnitude, angle);
 
-  // Convert image to grayscale float
-  Mat imgGray;
-  if (matSrc.channels() == 3)
-    cvtColor(matSrc, imgGray, COLOR_BGR2GRAY);
-  else
-    imgGray = matSrc.clone();
-
-  imgGray.convertTo(imgGray, CV_32F);
-  Mat gx, gy, magnitude;
-  Sobel(imgGray, gx, CV_32F, 1, 0, 3);
-  Sobel(imgGray, gy, CV_32F, 0, 1, 3);
-  magnitude.create(imgGray.size(), CV_32F);
-  magnitude = gx.mul(gx) + gy.mul(gy);
-  sqrt(magnitude, magnitude);
-
-  int rows = matSrc.rows;
-  int cols = matSrc.cols;
-  const int patchH = patterns->at(layer).image.rows;
-  const int patchW = patterns->at(layer).image.cols;
-  const int resultH = rows - patchH + 1;
-  const int resultW = cols - patchW + 1;
-
-  matResult.create(resultH, resultW, CV_32FC1);
-  matResult.setTo(0.0f);
-
-  float* gxData = (float*)gx.data;
-  float* gyData = (float*)gy.data;
-  float* magData = (float*)magnitude.data;
-  const int imgStride = gx.cols;
-
-  int startRowIdx = 0, endRowIdx = resultH;
-  int startColIdx = 0, endColIdx = resultW;
-  Point pt_center = patternPoints[0].Center;
-
-  if (fromCenter) {
-    const int centerTolerantRow = (int)(imgGray.rows * 0.3);
-    const int centerTolerantCol = (int)(imgGray.cols * 0.3);
-    // startRowIdx = max(0, patternPoints[0].Center.y - centerTolerantRow);
-    // endRowIdx = min(resultH, patternPoints[0].Center.y + centerTolerantRow);
-    // startColIdx = max(0, patternPoints[0].Center.x - centerTolerantCol);
-    // endColIdx = min(resultW, patternPoints[0].Center.x + centerTolerantCol);
-    startRowIdx = patternPoints[0].Center.y - centerTolerantRow;
-    endRowIdx = patternPoints[0].Center.y + centerTolerantRow;
-    startColIdx = patternPoints[0].Center.x - centerTolerantCol;
-    endColIdx = patternPoints[0].Center.x + centerTolerantCol;
+  // Chuẩn hóa mẫu thành SoA
+  vector<float> offsetX(noOfCoords), offsetY(noOfCoords);
+  vector<double> iTx(noOfCoords), iTy(noOfCoords), iMag(noOfCoords);
+  for (int i = 0; i < noOfCoords; ++i) {
+    offsetX[i] = modelPattern[i].Offset.x;
+    offsetY[i] = modelPattern[i].Offset.y;
+    iTx[i] = modelPattern[i].Derivative.x;
+    iTy[i] = modelPattern[i].Derivative.y;
+    iMag[i] = modelPattern[i].Magnitude;
   }
 
-#pragma omp parallel for
-  for (int rowIdx = startRowIdx; rowIdx < endRowIdx; ++rowIdx) {
-    for (int colIdx = startColIdx; colIdx < endColIdx; ++colIdx) {
-      __m256 sum = _mm256_setzero_ps();
-      float totalSum = 0.0f;
-      int count = 0;
+  // Chuẩn bị đầu ra
+  int resultRows = matSrc.rows - patterns.image.rows + 1;
+  int resultCols = matSrc.cols - patterns.image.cols + 1;
+  matResult.create(resultRows, resultCols, CV_32FC1);
+  matResult.setTo(0);
 
-      for (; count + 8 <= patternSize; count += 8) {
-        __m256 iSx, iSy, iTx, iTy, magVal, invMag, magWeight;
+  Point ptCenter = modelPattern[0].Center;
+  int startRow = 0, endRow = resultRows;
+  int startCol = 0, endCol = resultCols;
 
-        float sx[8], sy[8], mag8[8], tx[8], ty[8], mw[8];
-        bool valid = true;
+  if (fromCenter) {
+    int tolRow = static_cast<int>(imgGray.rows * 0.3);
+    int tolCol = static_cast<int>(imgGray.cols * 0.3);
+    startRow = std::max(0, ptCenter.y - tolRow);
+    endRow   = std::min(resultRows, ptCenter.y + tolRow);
+    startCol = std::max(0, ptCenter.x - tolCol);
+    endCol   = std::min(resultCols, ptCenter.x + tolCol);
+  }
 
-        for (int i = 0; i < 8; ++i) {
-          int x = colIdx + patternPoints[count + i].Offset.x;
-          int y = rowIdx + patternPoints[count + i].Offset.y;
+  for (int row = startRow; row < endRow; ++row) {
+    for (int col = startCol; col < endCol; ++col) {
+      vector<double> iSx(noOfCoords), iSy(noOfCoords), invMag(noOfCoords);
+      bool skip = false;
 
-          if (x < 0 || y < 0 || x >= cols || y >= rows) {
-            valid = false;
-            break;
-          }
+      for (int k = 0; k < noOfCoords; ++k) {
+        int x = col + static_cast<int>(offsetX[k]);
+        int y = row + static_cast<int>(offsetY[k]);
 
-          int idx = y * imgStride + x;
-          sx[i] = gxData[idx];
-          sy[i] = gyData[idx];
-          mag8[i] = magData[idx];
-          tx[i] = patternPoints[count + i].Derivative.x;
-          ty[i] = patternPoints[count + i].Derivative.y;
-          mw[i] = patternPoints[count + i].Magnitude;
+        if (x < 0 || y < 0 || x >= imgGray.cols || y >= imgGray.rows) {
+          skip = true; break;
         }
 
-        if (!valid)
-          break;
-
-        iSx = _mm256_loadu_ps(sx);
-        iSy = _mm256_loadu_ps(sy);
-        iTx = _mm256_loadu_ps(tx);
-        iTy = _mm256_loadu_ps(ty);
-        magVal = _mm256_loadu_ps(mag8);
-        magWeight = _mm256_loadu_ps(mw);
-
-        __m256 dot = _mm256_add_ps(_mm256_mul_ps(iSx, iTx), _mm256_mul_ps(iSy, iTy));
-        invMag = _mm256_rcp_ps(magVal); // approximate 1/mag
-        dot = _mm256_mul_ps(dot, _mm256_mul_ps(magWeight, invMag));
-        sum = _mm256_add_ps(sum, dot);
+        double gxVal = gx.ptr<double>(y)[x];
+        double gyVal = gy.ptr<double>(y)[x];
+        double mag   = magnitude.ptr<double>(y)[x];
+        iSx[k] = gxVal;
+        iSy[k] = gyVal;
+        invMag[k] = (mag != 0.0) ? (1.0 / mag) : 0.0;
       }
 
-      float buffer[8];
-      _mm256_storeu_ps(buffer, sum);
-      for (int i = 0; i < 8; ++i)
-        totalSum += buffer[i];
+      if (skip) continue;
 
-      // Handle remaining points
-      for (; count < patternSize; ++count) {
-        int x = colIdx + patternPoints[count].Offset.x;
-        int y = rowIdx + patternPoints[count].Offset.y;
-        if (x < 0 || y < 0 || x >= cols || y >= rows)
-          break;
-        int idx = y * imgStride + x;
-        float sx = gxData[idx];
-        float sy = gyData[idx];
-        float mag = magData[idx];
-        if (mag == 0.0f) continue;
+      // SIMD hóa dot product
+      __m256d vSum = _mm256_setzero_pd();
+      int i = 0;
+      for (; i + 3 < noOfCoords; i += 4) {
+        __m256d vSx = _mm256_loadu_pd(&iSx[i]);
+        __m256d vSy = _mm256_loadu_pd(&iSy[i]);
+        __m256d vTx = _mm256_loadu_pd(&iTx[i]);
+        __m256d vTy = _mm256_loadu_pd(&iTy[i]);
+        __m256d vMag = _mm256_loadu_pd(&iMag[i]);
+        __m256d vInvMag = _mm256_loadu_pd(&invMag[i]);
 
-        float tx = patternPoints[count].Derivative.x;
-        float ty = patternPoints[count].Derivative.y;
-        float mw = patternPoints[count].Magnitude;
-        totalSum += ((sx * tx + sy * ty) * (mw / mag));
-
-        int num = count + 1;
-        float partialScore = totalSum / num;
-        float minBreak = std::min((float)((minScores - 1) + normGreediness * num),
-                                  (float)(normMinScore * num));
-        if (partialScore < minBreak)
-          break;
+        __m256d dot = _mm256_add_pd(_mm256_mul_pd(vSx, vTx), _mm256_mul_pd(vSy, vTy));
+        __m256d scale = _mm256_mul_pd(vMag, vInvMag);
+        vSum = _mm256_add_pd(vSum, _mm256_mul_pd(dot, scale));
       }
 
-      float finalScore = totalSum / patternSize;
-      if (finalScore >= minScores) {
-        int tl_x = colIdx - pt_center.x;
-        int tl_y = rowIdx - pt_center.y;
-        if (tl_x >= 0 && tl_y >= 0 && tl_x < resultW && tl_y < resultH)
-          matResult.at<float>(tl_y, tl_x) = finalScore;
+      double temp[4];
+      _mm256_storeu_pd(temp, vSum);
+      double sum = temp[0] + temp[1] + temp[2] + temp[3];
+
+      for (; i < noOfCoords; ++i) {
+        double dot = iSx[i] * iTx[i] + iSy[i] * iTy[i];
+        sum += dot * iMag[i] * invMag[i];
+      }
+
+      double score = sum / noOfCoords;
+
+      // Early rejection (greediness)
+      double normMinScore = minScores / noOfCoords;
+      double normGreedy = ((1 - m_edgeProfile.greediness * minScores) / (1 - m_edgeProfile.greediness)) / noOfCoords;
+      double minBreakScore = std::min((minScores - 1) + normGreedy * noOfCoords, normMinScore * noOfCoords);
+
+      if (score >= minBreakScore) {
+        int rx = col - ptCenter.x;
+        int ry = row - ptCenter.y;
+        if (rx >= 0 && ry >= 0 && rx < matResult.cols && ry < matResult.rows) {
+          matResult.at<float>(ry, rx) = static_cast<float>(score);
+        }
       }
     }
   }

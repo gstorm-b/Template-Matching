@@ -103,6 +103,40 @@ QVariant RoiItem::itemChange(QGraphicsItem::GraphicsItemChange change, const QVa
   //   QRectF newRect = value.toRectF();
   //   setTransformOriginPoint(newRect.center());
   // }
+
+  if (change == QGraphicsItem::ItemPositionChange && parentItem()) {
+    QPointF newPos = value.toPointF();
+
+    // bounding rect của chính item trong hệ toạ độ của parent
+    // QRectF rectInParent = mapRectToParent(boundingRect());
+    QRectF rectInParent = mapRectToParent(rect());
+    QRectF parentRect = parentItem()->boundingRect();
+
+    // vector offset khi di chuyển
+    QPointF delta = newPos - pos();
+    QRectF movedRect = rectInParent.translated(delta);
+
+    // nếu vượt ra khỏi parent thì điều chỉnh lại
+    QPointF corrected = newPos;
+
+    // if (correctRectItem(movedRect, corrected)) {
+    //   return corrected;
+    // }
+
+    if (!parentRect.contains(movedRect)) {
+      if (movedRect.left() < parentRect.left())
+        corrected.rx() += parentRect.left() - movedRect.left();
+      if (movedRect.right() > parentRect.right())
+        corrected.rx() -= movedRect.right() - parentRect.right();
+      if (movedRect.top() < parentRect.top())
+        corrected.ry() += parentRect.top() - movedRect.top();
+      if (movedRect.bottom() > parentRect.bottom())
+        corrected.ry() -= movedRect.bottom() - parentRect.bottom();
+
+      return corrected;
+    }
+  }
+
   return QGraphicsRectItem::itemChange(change, value);
 }
 
@@ -155,6 +189,15 @@ RoiItem::HandlePosition RoiItem::getHandleAt(const QPointF &pos) const {
   return None;
 }
 
+bool RoiItem::isInsideParent(QRectF &new_rect) {
+  if (parentItem() != nullptr) {
+    QRectF childInParent = this->mapRectToParent(new_rect);
+    QRectF parentRect = parentItem()->boundingRect();
+    return parentRect.contains(childInParent);
+  }
+  return false;
+}
+
 void RoiItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
   if (m_ignore != nullptr) {
     if (*m_ignore == true) {
@@ -175,6 +218,7 @@ void RoiItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
   if (m_current_handle == RotateHandle) {
     // Lưu lại góc xoay ban đầu và tâm xoay (được thiết lập từ transformOriginPoint)
     m_original_rotation = rotation();
+    m_valid_rotation = m_original_rotation;
     m_rotation_origin = mapToScene(transformOriginPoint());
     // m_rotation_origin = mapToScene(rect().center());
     // Tính góc ban đầu từ tâm đến vị trí chuột
@@ -208,6 +252,15 @@ void RoiItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
     qreal currentAngle = QLineF(m_rotation_origin, event->scenePos()).angle();
     qreal angleDiff = currentAngle - m_press_angle;
     setRotation(m_original_rotation - angleDiff);
+
+    // avoid rotate out side of parrent
+    QRectF new_rect = mapRectToParent(rect());
+    if (!parentItem()->boundingRect().contains(new_rect)) {
+      setRotation(m_valid_rotation);
+    } else {
+      m_valid_rotation = m_original_rotation - angleDiff;
+    }
+
     event->accept();
     return;
   } else if (m_current_handle != None) {
@@ -230,6 +283,13 @@ void RoiItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event) {
       default:
         break;
     }
+
+    // check new position outside parrent
+    if (!isInsideParent(newRect)) {
+      event->accept();
+      return;
+    }
+
 
     // Đảm bảo rằng newRect có kích thước hợp lý
     if (newRect.width() < m_handle_size*2) {

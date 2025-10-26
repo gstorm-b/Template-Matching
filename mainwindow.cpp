@@ -30,8 +30,8 @@ void MainWindow::btn_match_clicked() {
 
   Matcher matcher;
   matcher.max_pos_num = 50;
-  matcher.max_overlap = 0.1;
-  matcher.min_reduce_length = 16;
+  matcher.max_overlap = 0.2;
+  matcher.min_reduce_length = 32;
   matcher.tolerance_angle = 180.0;
   matcher.min_score = 0.9;
   matcher.sub_pixel_estimation = false;

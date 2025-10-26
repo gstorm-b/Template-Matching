@@ -33,6 +33,9 @@ class RoiItem : public QGraphicsRectItem {
     QRectF rotateHandleRect() const;
     HandlePosition getHandleAt(const QPointF &pos) const;
 
+    bool isInsideParent(QRectF &new_rect);
+    bool correctRectItem(QRectF &moved_rect, QPointF &corrected);
+
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
@@ -48,6 +51,7 @@ class RoiItem : public QGraphicsRectItem {
     QPointF m_press_pos;
     // variables for rotate
     qreal m_original_rotation;
+    qreal m_valid_rotation;
     QPointF m_rotation_origin;
     qreal m_press_angle;
 
